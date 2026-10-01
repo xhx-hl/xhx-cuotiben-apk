@@ -33,6 +33,27 @@ jobs:
           yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
           "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-34" "build-tools;34.0.0"
 
+      - name: Ensure signing keystore (以后升级用同一个签名)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -e
+          mkdir -p signing
+          if [ -f signing/cuotiben.jks ]; then
+            echo "keystore 已在仓库里，直接用"
+          else
+            keytool -genkeypair -keystore signing/cuotiben.jks -alias cuotiben \
+              -keyalg RSA -keysize 2048 -validity 10000 \
+              -storepass cuotiben2026 -keypass cuotiben2026 \
+              -dname "CN=XiongHaoxuan, OU=xhx, O=xhx, L=SZ, S=GD, C=CN"
+            git config user.email "ci@github.com"
+            git config user.name "CI Bot"
+            git add -f signing/cuotiben.jks
+            git commit -m "Add signing keystore" || echo "nothing to commit"
+            git push "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.git" HEAD:signing --force
+            echo "keystore 已生成并存进 signing 分支"
+          fi
+
       - name: Build APK
         uses: gradle/gradle-build-action@v3
         with:

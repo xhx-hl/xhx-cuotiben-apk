@@ -2,6 +2,11 @@ plugins {
     id 'com.android.application'
 }
 
+/* 固定签名：以后每次升级都用它，手机上可以直接覆盖安装（不用先卸载）。
+   keystore 由 CI 在 signing 分支生成并存为 signing/cuotiben.jks；本地没这个文件时自动退回默认调试签名。 */
+def KS = rootProject.file("signing/cuotiben.jks")
+def HAS_KS = KS.exists()
+
 android {
     namespace 'com.photosolver.app'
     compileSdk 34
@@ -19,9 +24,24 @@ android {
         buildConfigField "String", "APP_LAN_URL", "\"${appLanUrl}\""
     }
 
+    signingConfigs {
+        fixed {
+            if (HAS_KS) {
+                storeFile KS
+                storePassword "cuotiben2026"
+                keyAlias "cuotiben"
+                keyPassword "cuotiben2026"
+            }
+        }
+    }
+
     buildTypes {
         release {
             minifyEnabled false
+            if (HAS_KS) signingConfig signingConfigs.fixed
+        }
+        debug {
+            if (HAS_KS) signingConfig signingConfigs.fixed
         }
     }
 

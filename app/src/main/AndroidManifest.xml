@@ -8,6 +8,7 @@
 
     <application
         android:allowBackup="true"
+        android:usesCleartextTraffic="true"
         android:icon="@mipmap/ic_launcher"
         android:label="熊皓轩的错题本"
         android:supportsRtl="true"

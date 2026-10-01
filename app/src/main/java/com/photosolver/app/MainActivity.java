@@ -1,21 +1,34 @@
 package com.photosolver.app;
 
+import android.Manifest;
 import android.app.Activity;
+import android.content.ContentValues;
+import android.content.Intent;
+import android.content.pm.PackageManager;
 import android.graphics.Color;
+import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.provider.MediaStore;
 import android.view.View;
 import android.widget.TextView;
+import android.widget.Toast;
 import android.webkit.PermissionRequest;
+import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
+import android.webkit.WebChromeClient.FileChooserParams;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 
 public class MainActivity extends Activity {
 
+    private static final int REQUEST_SELECT_FILE = 1;
+
     private WebView webView;
     private int urlIndex = 0;
     private final java.util.ArrayList<String> failures = new java.util.ArrayList<String>();
+    private ValueCallback<Uri[]> filePathCallback;
+    private Uri cameraImageUri;
 
     /* 第一个：这台电脑上「启动错题本服务.bat」开的服务（手机连同一个 WiFi 才能用，拍照能直传电脑）。
        第二个：线上发布版，只在连不上本机服务时兜底（它是纯静态，拍照只能存本机、传不到电脑）。 */
@@ -132,9 +145,73 @@ public class MainActivity extends Activity {
                     }
                 });
             }
+
+            /* 页面里的「拍照 / 从相册选」按钮就是 <input type="file">，
+               必须由这里把系统相机/相册调起来 —— 不实现它，按钮点了完全没反应。 */
+            @Override
+            public boolean onShowFileChooser(final WebView webView,
+                    final ValueCallback<Uri[]> cb, FileChooserParams fileChooserParams) {
+                try {
+                    if (filePathCallback != null) {
+                        filePathCallback.onReceiveValue(null);
+                    }
+                    filePathCallback = cb;
+                    cameraImageUri = makeCameraUri();
+                    Intent intent = fileChooserParams.createIntent();
+                    // 自己准备一个输出位置：相机拍完有些机型返回的 data 是 null，靠这个 Uri 取回照片
+                    intent.putExtra(MediaStore.EXTRA_OUTPUT, cameraImageUri);
+                    startActivityForResult(intent, REQUEST_SELECT_FILE);
+                    return true;
+                } catch (Exception e) {
+                    filePathCallback = null;
+                    Toast.makeText(MainActivity.this, "打不开相机：" + e.getMessage(),
+                            Toast.LENGTH_LONG).show();
+                    return false;
+                }
+            }
         });
 
         loadCurrentUrl();
+    }
+
+    /* 在系统相册里占一个位置放刚拍的照片，页面才能读得到 */
+    private Uri makeCameraUri() {
+        ContentValues cv = new ContentValues();
+        cv.put(MediaStore.Images.Media.TITLE, "cuotiban_capture.jpg");
+        cv.put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg");
+        cv.put(MediaStore.Images.Media.DATE_TAKEN, System.currentTimeMillis());
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            cv.put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/Cuotiben");
+        } else if (checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE)
+                != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(new String[]{Manifest.permission.WRITE_EXTERNAL_STORAGE}, 2);
+        }
+        return getContentResolver().insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, cv);
+    }
+
+    /* 相机/相册关掉之后，把选到的图片交回给页面 */
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode != REQUEST_SELECT_FILE || filePathCallback == null) {
+            return;
+        }
+        Uri[] results = null;
+        if (resultCode == RESULT_OK) {
+            if (data != null) {
+                String path = data.getDataString();
+                if (path != null) {
+                    results = new Uri[]{ Uri.parse(path) };
+                }
+            }
+            // 用系统相机拍的时候 data 常常是 null，就用我们自己准备的 Uri
+            if (results == null && cameraImageUri != null) {
+                results = new Uri[]{ cameraImageUri };
+            }
+        }
+        filePathCallback.onReceiveValue(results);
+        filePathCallback = null;
+        cameraImageUri = null;
     }
 
     @Override

@@ -6,6 +6,10 @@ android {
     namespace 'com.photosolver.app'
     compileSdk 34
 
+    buildFeatures {
+        buildConfig true
+    }
+
     defaultConfig {
         applicationId 'com.photosolver.app'
         minSdk 26

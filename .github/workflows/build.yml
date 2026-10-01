@@ -33,15 +33,21 @@ jobs:
           yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
           "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-34" "build-tools;34.0.0"
 
-      - name: Ensure signing keystore (以后升级用同一个签名)
+      # 关键：keystore 存在 signing 分支上，每次构建前先把它拉下来复用。
+      # 只有这样「每次升级都是同一个签名」，手机上才能直接覆盖安装（不用卸载重装）。
+      - name: 准备固定签名 keystore（以后升级用同一个签名）
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -e
           mkdir -p signing
-          if [ -f signing/cuotiben.jks ]; then
-            echo "keystore 已在仓库里，直接用"
+          # 能拿到仓库里已存好的 keystore 就直接用（这样签名永远不变）
+          if git fetch --depth=1 origin signing && \
+             git cat-file -e origin/signing:signing/cuotiben.jks 2>/dev/null; then
+            git show origin/signing:signing/cuotiben.jks > signing/cuotiben.jks
+            echo "keystore 已存在，直接复用（签名不变）"
           else
+            # 只在第一次构建时执行：生成一个 keystore 并存档到 signing 分支
             keytool -genkeypair -keystore signing/cuotiben.jks -alias cuotiben \
               -keyalg RSA -keysize 2048 -validity 10000 \
               -storepass cuotiben2026 -keypass cuotiben2026 \
@@ -51,8 +57,12 @@ jobs:
             git add -f signing/cuotiben.jks
             git commit -m "Add signing keystore" || echo "nothing to commit"
             git push "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.git" HEAD:signing --force
-            echo "keystore 已生成并存进 signing 分支"
+            echo "keystore 首次生成，已存进 signing 分支"
           fi
+          ls -l signing/cuotiben.jks
+          # 把 key 的指纹打进日志：以后比对日志就能确认是不是同一个签名
+          keytool -list -v -keystore signing/cuotiben.jks -storepass cuotiben2026 2>/dev/null \
+            | grep -E "Alias name|Owner|SHA256" || true
 
       - name: Build APK
         uses: gradle/gradle-build-action@v3
@@ -60,6 +70,12 @@ jobs:
           gradle-version: '8.9'
           arguments: assembleDebug --no-daemon --stacktrace
           cache-disabled: true
+
+      # 校验签名：把 APK 里的签名证书打进日志，和 keystore 指纹比对即可确认每次升级都是同一个签名
+      - name: 校验 APK 签名
+        run: |
+          "$ANDROID_HOME/build-tools/34.0.0/apksigner" verify --print-certs -v \
+            app/build/outputs/apk/debug/app-debug.apk
 
       - name: Deliver APK via branch
         if: success()
